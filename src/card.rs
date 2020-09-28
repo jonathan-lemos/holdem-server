@@ -1,10 +1,12 @@
 use std::slice::Iter;
 use std::marker::Copy;
+use std::iter;
 use rand::seq::SliceRandom;
-use itertools::Itertools;
+
+use crate::linq::GroupBy;
 
 /// Represents a hand's rank
-#[derive(Copy, Clone, PartialOrd, Ord, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, PartialOrd, Ord, PartialEq, Eq, Hash, Sub, Add)]
 enum Rank {
     Two,
     Three,
@@ -226,6 +228,35 @@ struct Card {
     suit: Suit
 }
 
+trait CardGroups {
+    fn to_pair(&self) -> [Card; 2];
+    fn to_five(&self) -> [Card; 5];
+    fn to_seven(&self) -> [Card; 7];
+}
+
+impl CardGroups for &[Card] {
+    fn to_pair(&self) -> [Card; 2] {
+        let arr = [Card { rank: Rank::Two, suit: Suit::Diamond }; 2];
+        assert_eq!(self.len(), 2);
+        arr.iter_mut().zip(self.iter()).for_each(|x| *x.0 = *x.1);
+        arr
+    }
+
+    fn to_five(&self) -> [Card; 5] {
+        let arr = [Card { rank: Rank::Two, suit: Suit::Diamond }; 5];
+        assert_eq!(self.len(), 5);
+        arr.iter_mut().zip(self.iter()).for_each(|x| *x.0 = *x.1);
+        arr
+    }
+
+    fn to_seven(&self) -> [Card; 7] {
+        let arr = [Card { rank: Rank::Two, suit: Suit::Diamond }; 7];
+        assert_eq!(self.len(), 5);
+        arr.iter_mut().zip(self.iter()).for_each(|x| *x.0 = *x.1);
+        arr
+    }
+}
+
 impl Card {
     /// Turns a 2-character string into a card. This is meant for quick testing and not actual code.
     pub fn of(s: &str) -> Card {
@@ -257,7 +288,79 @@ impl Card {
         c.shuffle(&mut rng);
     }
 
-    pub fn bestFive(cards: &[Card; 7]) -> (HandRank, [Card; 5]) {
+    fn is_straight(cards: &[Card]) -> bool {
+        let prev = cards[0].rank;
+
+        for i in 1..cards.len() {
+            let cur = cards[i].rank;
+
+            if i == 1 && prev == Rank::Ace && cur == Rank::Five {
+                prev = cur;
+                continue;
+            }
+
+            if cur.to_u32() != prev.to_u32() - 1 {
+                return false;
+            }
+
+            prev = cur;
+        }
+
+        true
+    }
+
+    pub fn best_five(cards: &[Card; 7]) -> (HandRank, [Card; 5]) {
         let suits = cards.iter().group_by(|c| c.suit);
+        let ranks = cards.iter().group_by(|c| c.rank);
+
+        let hand_sort = |v: &mut Vec<Card>| {
+            v.sort_unstable();
+            v.reverse();
+        };
+
+        suits.values_mut().for_each(hand_sort);
+        ranks.values_mut().for_each(hand_sort);
+
+        let maxSuit = *suits.values().fold(&Vec::new(), |a, c| if a.len() >= c.len() { a } else { c });
+        let maxRank = *ranks.values().fold(&Vec::new(), |a, c| if a.len() >= c.len() { a } else { c });
+
+        if maxSuit.len() >= 5 {
+            let res = (0..maxSuit.len() - 5).map(|n| &maxSuit[n..n + 5]).find(|a| Card::is_straight(a));
+            match res {
+                Some(s) => return (HandRank::StraightFlush, s.to_five()),
+                None => ()
+            }
+        }
+
+        if maxRank.len() == 4 {
+            let lastCard = *cards.iter().filter(|x| x.rank != maxRank[0].rank).max().unwrap();
+            maxRank.push(lastCard);
+            return (HandRank::Quads, (&maxRank[..]).to_five());
+
+        }
+
+        let trips: Vec<&Vec<Card>> = ranks.values().filter(|x| x.len() == 3).collect();
+        let pairs: Vec<&Vec<Card>> = ranks.values().filter(|x| x.len() == 2).collect();
+
+        if trips.len() > 0 && trips.len() + pairs.len() > 0 {
+            let trip = trips.iter().max_by_key(|x| x[0].rank).unwrap();
+            let tripOther = trips.iter().filter(|x| x[0].rank != trip[0].rank).max_by_key(|x| x[0].rank).unwrap();
+            let pairTemp = pairs.iter().max_by_key(|x| x[0].rank).unwrap();
+
+            let pair = if tripOther[0].rank > pairTemp[0].rank {
+                &tripOther[..2]
+            }
+            else {
+                pairTemp
+            };
+
+            return (HandRank::Boat, trip.iter().chain(pair).to_five())
+        }
+
+        let mut sortedCards = (&cards[..]).to_seven();
+        sortedCards.sort_unstable();
+        sortedCards.reverse();
+
+        return (HandRank::HighCard, (&sortedCards[..5]).to_five());
     }
 }

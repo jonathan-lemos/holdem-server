@@ -1,5 +1,5 @@
-mod card;
-mod linq;
+pub mod card;
+pub mod linq;
 
 fn main() {
     println!("Hello, world!");
